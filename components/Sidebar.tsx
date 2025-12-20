@@ -93,25 +93,6 @@ const Sidebar: React.FC<SidebarProps> = ({ selected, onSelect, isOpen, toggle })
               </li>
             ))}
           </ul>
-
-          <div className="px-4 mb-2 text-xs font-semibold text-slate-500 uppercase">
-            AI Tools
-          </div>
-          <ul className="space-y-1">
-             <li>
-                <button
-                  onClick={() => { onSelect(AlgorithmType.GEMINI_EDIT); toggle(); }}
-                  className={`w-full flex items-center px-4 py-2 text-sm rounded-lg transition-colors ${
-                    selected === AlgorithmType.GEMINI_EDIT
-                      ? 'bg-purple-600 text-white' 
-                      : 'text-purple-300 hover:bg-slate-800'
-                  }`}
-                >
-                  <ImageIcon size={18} className="mr-3" />
-                  AI Image Editor
-                </button>
-              </li>
-          </ul>
         </nav>
 
         <div className="p-4 border-t border-slate-700 text-xs text-slate-500 text-center">
