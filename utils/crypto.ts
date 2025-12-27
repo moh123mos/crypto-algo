@@ -287,66 +287,140 @@ export const railFenceCipher = (text: string, rails: number, decrypt = false): C
 
 export const rowTranspositionCipher = (text: string, key: string, decrypt = false): CipherResult => {
   const steps: Step[] = [];
-  const cleanKeyStr = key.replace(/[^0-9\s]/g, '');
-  let order: number[] = [];
   
-  if (cleanKeyStr.trim().length > 0) {
-      const parts = cleanKeyStr.trim().split(/\s+/).map(Number);
-      const sorted = [...parts].sort((a,b) => a-b);
-      if (sorted[0] === 1 && sorted[sorted.length-1] === parts.length && new Set(parts).size === parts.length) {
-          order = parts.map(n => n - 1); 
+  let order: number[] = [];
+  let isNumeric = false;
+  let numericDetails: { val: number, i: number }[] = [];
+
+  // 1. Parse Key
+  // Check if key is purely numeric (allowing separators)
+  const numericMatch = key.match(/^[\d\s,]+$/);
+  
+  if (numericMatch) {
+      const parts = key.trim().split(/[^\d]+/).filter(Boolean).map(Number);
+      if (parts.length > 0) {
+          // Map values to their original indices (positions)
+          const partsWithIdx = parts.map((val, i) => ({ val, i }));
+          
+          // Sort by value to determine the order of extraction
+          // Example: 3 1 2 4 -> (1, pos 1), (2, pos 2), (3, pos 0), (4, pos 3)
+          // Resulting order: [1, 2, 0, 3]
+          partsWithIdx.sort((a, b) => a.val - b.val);
+          
+          order = partsWithIdx.map(p => p.i);
+          numericDetails = partsWithIdx;
+          isNumeric = true;
       }
   }
-  
-  if (order.length === 0) {
+
+  if (!isNumeric) {
       const k = key.replace(/[^a-zA-Z]/g, '').toUpperCase();
       if (!k) return { text: "Error: Invalid key", steps: [], error: "Invalid Key" };
-      const sortedK = k.split('').map((c, i) => ({c, i})).sort((a, b) => a.c.localeCompare(b.c));
-      order = sortedK.map(x => x.i);
+      
+      const kWithIdx = k.split('').map((c, i) => ({ c, i }));
+      kWithIdx.sort((a, b) => a.c.localeCompare(b.c));
+      order = kWithIdx.map(p => p.i);
   }
 
   const numCols = order.length;
-  const numRows = Math.ceil(text.length / numCols);
+  // If key length is 0 (e.g. empty numeric key), handle error
+  if (numCols === 0) return { text: "Error: Invalid key length", steps: [], error: "Invalid Key" };
 
-  steps.push({ label: 'Configuration', details: `Grid: ${numRows} rows x ${numCols} cols. Key Order: ${order.map(i=>i+1).join(' ')}` });
+  // Visualization Step
+  if (isNumeric) {
+      const mappingStr = numericDetails.map(p => `Rank ${p.val} (Pos ${p.i + 1})`).join(' → ');
+      steps.push({ 
+          label: 'Key Analysis (Numeric)', 
+          details: `Reading columns by Rank: ${mappingStr}. Extraction Order Indices: [${order.map(i => i+1).join(', ')}]` 
+      });
+  } else {
+       steps.push({ 
+          label: 'Key Analysis (Alphabetic)', 
+          details: `Key: ${key.toUpperCase()}. Column priority based on alphabetical order: ${order.map(i => i+1).join(', ')}` 
+      });
+  }
+
+  let processingText = text;
+
+  // Encryption Padding
+  if (!decrypt) {
+      const remainder = processingText.length % numCols;
+      if (remainder !== 0) {
+          const padding = numCols - remainder;
+          processingText += 'X'.repeat(padding);
+          steps.push({ label: 'Padding', details: `Added ${padding} 'X' chars to complete the grid.` });
+      }
+  }
+
+  const numRows = processingText.length / numCols;
+  steps.push({ label: 'Grid Construction', details: `Grid size: ${numRows} Rows x ${numCols} Columns` });
 
   if (!decrypt) {
+    // --- ENCRYPTION ---
+    // 1. Build Grid (Row by Row)
     const grid: string[][] = [];
     let idx = 0;
     for(let r=0; r<numRows; r++) {
-        const row = [];
+        const row: string[] = [];
         for(let c=0; c<numCols; c++) {
-            row.push(idx < text.length ? text[idx++] : 'X'); 
+            row.push(processingText[idx++]);
         }
         grid.push(row);
         steps.push({ label: `Row ${r+1}`, details: row.join(' | '), isMath: true });
     }
     
-    let res = "";
+    // 2. Read Columns based on Calculated Order
+    let result = "";
     for(let i=0; i<numCols; i++) {
-        const colIdx = order[i]; 
+        const colIdx = order[i]; // The column index to read next
+        let colStr = "";
         for(let r=0; r<numRows; r++) {
-            res += grid[r][colIdx];
+            colStr += grid[r][colIdx];
         }
+        
+        // Detailed visualization for the first few columns or all
+        const rank = isNumeric ? numericDetails[i].val : i+1;
+        steps.push({ 
+            label: `Extracting Rank ${rank}`, 
+            details: `Column Index ${colIdx+1}: ${colStr}`, 
+            isMath: true 
+        });
+        
+        result += colStr;
     }
-    steps.push({ label: 'Read Columns', details: 'Read columns in key order' });
-    return { text: res, steps };
+    return { text: result, steps };
+
   } else {
-    const totalLen = text.length;
-    if (totalLen % numCols !== 0) return { text: "Error length", steps: [], error: "Text length mismatch" };
-    const calculatedRows = totalLen / numCols;
-    const grid = Array.from({length: calculatedRows}, () => Array(numCols).fill(''));
+    // --- DECRYPTION ---
+    if (processingText.length % numCols !== 0) return { text: "Error length", steps: [], error: "Text length mismatch" };
     
+    // We have the columns in string format, glued together.
+    // We need to place them back into the grid columns.
+    // The order array tells us: Chunk 1 goes to Column order[0], Chunk 2 goes to Column order[1], etc.
+    
+    const grid = Array.from({length: numRows}, () => Array(numCols).fill(''));
     let currentIdx = 0;
+    
     for (let i = 0; i < numCols; i++) {
-        const colIdx = order[i];
-        for (let r = 0; r < calculatedRows; r++) {
-            grid[r][colIdx] = text[currentIdx++];
+        const colIdx = order[i]; // Target column index
+        let colStr = "";
+        for (let r = 0; r < numRows; r++) {
+            const char = processingText[currentIdx++];
+            grid[r][colIdx] = char;
+            colStr += char;
         }
+        
+        const rank = isNumeric ? numericDetails[i].val : i+1;
+        steps.push({ 
+            label: `Filling Rank ${rank}`, 
+            details: `Filling Column ${colIdx+1} with: ${colStr}`, 
+            isMath: true 
+        });
     }
     
-    steps.push({ label: 'Reconstruct Grid', details: 'Filled columns based on key order' });
-    for(let r=0; r<calculatedRows; r++) {
+    // Read Row by Row
+    steps.push({ label: 'Reading Rows', details: 'Reading text row by row from reconstructed grid.' });
+    for(let r=0; r<numRows; r++) {
          steps.push({ label: `Row ${r+1}`, details: grid[r].join(' | '), isMath: true });
     }
     
